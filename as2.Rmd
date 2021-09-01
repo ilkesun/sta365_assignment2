@@ -1,0 +1,97 @@
+---
+title: "Assignment 2"
+author: "Ilke Sun"
+date: "16/04/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning = FALSE)
+
+dat <- read.csv("Verreauxs.accel.txt", sep = "\t")
+
+library(cmdstanr)
+library(bayesplot)
+library(ggplot2)
+library(tidyverse)
+library(tidybayes)
+library(loo)
+```
+
+# Task 1
+
+```{r task1}
+dat <- dat %>% 
+  mutate(log_msa = log(msa))
+
+hist(dat$msa, xlab = "MSA", main = "Histogram #1")
+
+mod0 <- cmdstan_model("mod0.stan")
+print(mod0)
+stan_dat <- list(K = 2, N = 1219, y = dat$log_msa)
+fit0 <- mod0$sample(stan_dat, parallel_chains = 4, refresh = 0, seed = 666,
+                    show_messages = F)
+print(fit0) 
+hist(dat$log_msa, xlab = "Log(MSA)", main = "Histogram #2", breaks = 90)
+mcmc_hist(fit0$draws(c("mu[1]", "mu[2]")))
+mcmc_hist(fit0$draws(c("p[1]", "p[2]")))
+```
+
+The first model, `mod0`, explores the data to determine the value for p which is the probability that the animal is in the high energy state which indicates that Z = 2. In this model, since there are two compartments, (1-p) corresponds to Z = 1 which states that the animal is in low energy state. In order to calculate p, I have sampled all of the data which includes 1219 observations. The priors on $\mu_1$ and $\mu_2$ are identical since there is no reason to assume that they would be different. In addition, $\sigma_1$ and $\sigma_2$ have identical priors. Both $\mu$ and $\sigma$ are assumed to have normal distribution and with the identified priors the results for the $\mu_1$ and $\mu_2$, which are given above, seem close to the real data, hence, believe that the priors on these variables are sound and work for this model. According to this model p is 0.53. Thus, the animal is in the high energy state with 53% probability and in low energy state with 47%.
+
+# Task 2
+
+```{r task2}
+mod1 <- cmdstan_model("mod1.stan")
+print(mod1)
+stan_dat <- list(K = 2, N = 1219, y = dat$log_msa, p = 0.53) 
+# with p = 0.53 incredibly low r-hats and ess's
+fit1 <- mod1$sample(stan_dat, parallel_chains = 4, refresh = 0, seed = 666,
+                    show_messages = F)
+print(fit1) # real bad
+mcmc_hist(fit1$draws(c("mu[1]", "mu[2]", "sigma[1]", "sigma[2]")))
+
+mod2 <- cmdstan_model("mod2.stan")
+print(mod2)
+stan_dat <- list(K = 2, N = 1219, y = dat$log_msa, wind = dat$wind_speed,
+                 temp = dat$saws_temp)
+fit2 <- mod2$sample(stan_dat, parallel_chains = 4, refresh = 0, seed = 666,
+                    show_messages = F, adapt_delta = 0.99)
+print(fit2)
+
+stan_dat <- list(K = 2, N = 1219, y = dat$log_msa, p = 0.38)
+fit3 <- mod1$sample(stan_dat, parallel_chains = 4, refresh = 0, seed = 666,
+                    show_messages = F)
+print(fit3)
+mcmc_hist((fit3$draws(c("mu[1]", "mu[2]", "sigma[1]", "sigma[2]"))))
+
+loo1 <- fit1$loo(save_psis = T)
+print(loo1)
+plot(loo1)
+rhats <- rhat(fit1)
+mcmc_rhat_hist(rhats)
+
+loo3 <- fit3$loo(save_psis = T)
+print(loo3)
+plot(loo3)
+rhats <- rhat(fit3)
+mcmc_rhat_hist(rhats)
+loo_compare(loo1, loo3)
+```
+
+For the second task I have created two models `mod1` and `mod2`. The first model for this task uses the fixed value for p which was calculated using the model in task 1, `mod0`. When we use this fixed value in the model we get a fit with really high r-hats and really low ESS values which is concerning. For this fit, `fit1`, I have also calculated the log likelihoods in order to be able to compare this model with the later one. The second model in this task estimates the probability of the animal being in high energy state by a logistic regression using the variables given in the data set. Variables that are used to estimate p are wind speed and temperature. Using this model, `mod2`, we have the second fit, also in this fit we observe even higher values for r-hat and lower values for ESS. However, estimating p using a logistic regression results in much different value for p than 0.53, which was the value calculated in the first task. Thus, I wanted to use the first model, `mod1`, which uses a fixed value for p and I have implemented the new estimate for p which was 0.38 in that model to create the third fit, `fit3`. Using p as a parameter in the Stan model have resulted in deficits in r-hats and ESS values for me so I wanted to use the fixed value model and create a new fit to compare the previously calculated value for p, 0.53, with the more recent estimation, 0.38. We observe that in `fit3` the r-hats are back on 1 and ESS values (for bot bulk and tail) are well above 500. I have calculated log likelihoods for this fit also so we can compare both fits using leave-one-out cross validation. Just by looking at the MCMC histograms and the summary for both fits, it is obvious that the `fit3` is much better. 36.5% of the Pareto k values in `fit1` are considered as very bad, whereas values corresponding to `fit3` are below 0.5. When we compare these two models we see that the later one is doing much better with a really big eldp difference between the two, -20023.6.
+
+
+```{r task 3}
+mod4 <- cmdstan_model("mod4.stan")
+stan_dat <- list(K = 3, N = 1219, y = dat$log_msa)
+fit4 <- mod4$sample(stan_dat, parallel_chains = 4)
+print(fit4)
+mcmc_hist((fit4$draws()))
+
+loo4 <- fit1$loo(save_psis = T)
+print(loo1)
+plot(loo1)
+rhats <- rhat(fit1)
+mcmc_rhat_hist(rhats)
+```
